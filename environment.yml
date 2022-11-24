@@ -1,0 +1,14 @@
+name: hg_cad
+channels:
+  - defaults
+dependencies:
+  - python=3.8.5
+  - cudatoolkit=11.3
+  - pytorch==1.12.0
+  - torchaudio==0.12.0
+  - torchvision==0.13.0
+  - pyg
+  - matplotlib
+  - seaborn
+  - pytorch-lightning
+  - dgl-cuda11.3

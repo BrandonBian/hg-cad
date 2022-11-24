@@ -4,11 +4,11 @@
 
 - **Setting up the environment**
 ```
-# Create conda environment "hg-cad"
+# Create conda environment "hg_cad" (Python==3.8.5, CUDA==11.3, PyTorch==1.12.0)
 conda env create -f environment.yml
 
 # Activate conda environment
-conda activate hg-cad
+conda activate hg_cad
 
 # Install torch_geometric
 conda install pyg -c pyg
@@ -19,6 +19,7 @@ conda install pyg -c pyg
 
 - **Training**: Training on train data, and automatically performs testing on test data when training is finished.
 ```
+# Additional tuning knobs included INSIDE python file -- see classification.py
 python classification.py train --dataset_path [path/to/dataset] --max_epoch 100 --batch_size 16 --gpus 1
 ```
 
@@ -29,6 +30,7 @@ python classification.py test --dataset_path [path/to/dataset] --checkpoint [pat
 
 - **Inference**: on a *single* sample assembly, and produce material label predictions for *all* of its bodies.
 ```
+# Additional tuning knobs included INSIDE python file -- see inference.py
 python inference.py single_sample --inference_sample [path/to/inference/sample] --checkpoint [path/to/best.ckpt] --vocab [path/to/vocab.pickle]
 ```
 

@@ -220,7 +220,7 @@ def train_test(args, trainer, Dataset):
     else:
         model = ClassificationGNN(args)
 
-    trainer.fit(model=model, train_dataloader=train_loader, val_dataloaders=val_loader)
+    trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 
     """Testing - Making Predictions Automatically Using Best Checkpoint"""
     if args.os == "Windows":

@@ -11,7 +11,6 @@ from utils.datasets import util
 
 
 def standard_scalar_transformation(tensor):
-    """Perform standard scalar transformation"""
     scaler = preprocessing.StandardScaler().fit(tensor)
     scaled = scaler.transform(tensor)
     scaled = torch.from_numpy(scaled)
@@ -159,16 +158,14 @@ def process_assembly_graph(graph, vocab, file_path, args):
         Input:
             [graph] NetworkX Digraph of assembly graph
             [vocab] Vocab dictionary for one-hot encoding of categorical (string) features
-            [file_path] directory to the assembly
 
         Output:
-            [data] A Torch Geometric Data() instance, with the following elements:
+            [ag] A Torch Geometric Data() instance, with the following elements:
                 1. nodes = Concatenated node features: [num of nodes] x [length of concatenated node features]
                 2. edges = Concatenated edge features: [num of edges] x [length of concatenated edge features]
                 3. edge_index = Adjacency list: 2 x [num of edges]
             [body_graphs] A list of DGL body graphs corresponding to bodies of this assembly (preserving order)
             [material] A list of Material ground truth labels (one-hot): [num of nodes] x 1
-            [body_ids] A list of body ids: [num of nodes] x 1
     """
 
     """Obtain DGL Body Graphs"""
@@ -340,9 +337,6 @@ def process_assembly_graph(graph, vocab, file_path, args):
     """Material Ground Truths"""
     material = torch.tensor([vocab[f'material'][n[-1][f'material']] for n in graph.nodes(data=True)])
 
-    """Body IDs"""
-    body_ids = [n[-1]["body_uuid"] for n in graph.nodes(data=True)]
-
     """Edge Feature"""
     for edge in graph.edges(data=True):
         edges.append(torch.zeros(2 * len(vocab['edge_type']) + 1))
@@ -362,10 +356,9 @@ def process_assembly_graph(graph, vocab, file_path, args):
     # 2. edges = Concatenated edge features: [num of edges] x [length of concatenated edge features]
     # 3. edge_index = Adjacency list: 2 x [num of edges]
 
+    # ~ body_graphs = List of DGL body graphsL [num of nodes] x 1
+    # ~ material = Material ground truth labels (one-hot): [num of nodes] x 1
+
     data = Data(x=nodes, edge_index=edge_index, e=edges)
 
-    # ~ body_graphs = List of DGL body graphs: [num of nodes] x 1
-    # ~ material = Material ground truth labels (one-hot): [num of nodes] x 1
-    # ~ body_ids = List of body ids: [num of nodes] x 1
-
-    return data, body_graphs, material, body_ids
+    return data, body_graphs, material

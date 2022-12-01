@@ -12,7 +12,6 @@ import seaborn as sn
 import pandas as pd
 import platform
 import multiprocessing
-import pickle
 
 from tqdm import tqdm
 from pathlib import Path
@@ -29,34 +28,31 @@ from utils.datasets.assemblygraphs import AssemblyGraphs
 def get_parser():
     """Obtain argument parser"""
 
-    """Command Line Arguments"""
-    parser = argparse.ArgumentParser("Classification Model")
+    """Customized Parameters"""
+    parser = argparse.ArgumentParser("UV-Net solid model classification")
     parser.add_argument("traintest", choices=("train", "test"), default="train", help="Whether to train or test")
     parser.add_argument("--dataset_path", type=str, help="Path to dataset")
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument("--checkpoint", type=str, default=None, help="Checkpoint file to load weights from", )
 
-    """Global Parameters (populated on-run and shared across modules)"""
+    """Global Parameters (shared across modules)"""
     parser.add_argument("--experiment_id", type=str)
     parser.add_argument("--node_dim", type=int)
     parser.add_argument("--edge_dim", type=int)
-    parser.add_argument('--gnn_type', type=str, default='sage', choices=['sage'])
+    parser.add_argument('--gnn_type', type=str, default='sage', choices=['sage'])  # TODO: add more choices
     parser.add_argument("--hid_dim", type=int, default=256)
     parser.add_argument("--num_layers", type=int, default=7)
     parser.add_argument("--train_set", type=list)
     parser.add_argument("--val_set", type=list)
     parser.add_argument("--test_set", type=list)
-    parser.add_argument("--vocab", type=dict)
 
     """Customized Parameters (for feature engineering)"""
-    parser.add_argument("--node_drop", type=bool, default=True)
+    parser.add_argument("--node_drop", type=bool, default=False)
     parser.add_argument("--UV_Net", type=bool, default=True)
     parser.add_argument("--image_fingerprint", type=bool, default=False)
-    parser.add_argument("--MVCNN_embedding", type=bool, default=True)
+    parser.add_argument("--MVCNN_embedding", type=bool, default=False)
     parser.add_argument("--random_seed", type=int)
     parser.add_argument("--os", type=str)
-    parser.add_argument("--single_node_prediction", type=bool, default=True)
-    parser.add_argument("--fixed_split", type=bool, default=False)
 
     """Return Parser"""
     parser = Trainer.add_argparse_args(parser)
@@ -136,6 +132,8 @@ def initialization(args):
             str(results_path), name=month_day + '_' + hour_min_second, version="logger"
         ),
         accumulate_grad_batches=32,
+        # accelerator='gpu',
+        # devices=1
     )
 
     Dataset = AssemblyGraphs
@@ -144,76 +142,25 @@ def initialization(args):
 
 
 def train_test(args, trainer, Dataset):
-    """Train & Test"""
+    """Train & Validation"""
     seed_everything(seed=args.random_seed, workers=True)
 
-    """Obtain node and edge feature dimensions"""
     train_data = Dataset(args, root_dir=args.dataset_path, split="train")
     val_data = Dataset(args, root_dir=args.dataset_path, split="val")
 
-    args.node_dim = train_data.node_dim()
     if args.UV_Net:
-        args.node_dim += 128
-    if args.single_node_prediction:
-        if args.node_dropping:
-            args.node_dim += 6
-        else:
-            args.node_dim += 8
-
+        args.node_dim = train_data.node_dim() + 128
+    else:
+        args.node_dim = train_data.node_dim()
     args.edge_dim = train_data.edge_dim()
 
-    """Obtaining dataloaders"""
     if args.os == "Windows":
         train_loader = train_data.get_dataloader(batch_size=args.batch_size, shuffle=True)
         val_loader = val_data.get_dataloader(batch_size=args.batch_size, shuffle=False)
     else:
-        train_loader = train_data.get_dataloader(batch_size=args.batch_size, shuffle=True,
-                                                 num_workers=multiprocessing.cpu_count())
-        val_loader = val_data.get_dataloader(batch_size=args.batch_size, shuffle=False,
-                                             num_workers=multiprocessing.cpu_count())
+        train_loader = train_data.get_dataloader(batch_size=args.batch_size, shuffle=True, num_workers=multiprocessing.cpu_count())
+        val_loader = val_data.get_dataloader(batch_size=args.batch_size, shuffle=False, num_workers=multiprocessing.cpu_count())
 
-    """Save Configurations"""
-    if args.os == "Windows":
-        experiment_id = args.experiment_id.split('\\')[-1]
-    else:
-        experiment_id = args.experiment_id.split('/')[-1]
-
-    # Save Random Seed + Vocab + Train/val/test sets
-    if args.os == "Windows":
-        if not os.path.exists(f"results\\checkpoints\\{experiment_id}"):
-            os.makedirs(f"results\\checkpoints\\{experiment_id}")
-
-        with open(f"results\\checkpoints\\{experiment_id}\\random_seed.txt", "w") as f:
-            f.write(str(args.random_seed))
-
-        with open(f"results\\checkpoints\\{experiment_id}\\vocab.pickle", "wb") as f:
-            pickle.dump(args.vocab, f, pickle.HIGHEST_PROTOCOL)
-
-        with open(f"results\\checkpoints\\{experiment_id}\\train_set.txt", 'w') as f:
-            for assembly in args.train_set:
-                f.write(f"{assembly}\n")
-        with open(f"results\\checkpoints\\{experiment_id}\\val_set.txt", 'w') as f:
-            for assembly in args.val_set:
-                f.write(f"{assembly}\n")
-
-    else:
-        if not os.path.exists(f"results/checkpoints/{experiment_id}"):
-            os.makedirs(f"results/checkpoints/{experiment_id}")
-
-        with open(f"results/checkpoints/{experiment_id}/random_seed.txt", "w") as f:
-            f.write(str(args.random_seed))
-
-        with open(f"results/checkpoints/{experiment_id}/vocab.pickle", "wb") as f:
-            pickle.dump(args.vocab, f, pickle.HIGHEST_PROTOCOL)
-
-        with open(f"results/checkpoints/{experiment_id}/train_set.txt", 'w') as f:
-            for assembly in args.train_set:
-                f.write(f"{assembly}\n")
-        with open(f"results/checkpoints/{experiment_id}/val_set.txt", 'w') as f:
-            for assembly in args.val_set:
-                f.write(f"{assembly}\n")
-
-    """Training"""
     if args.checkpoint:
         print("Loading from existing checkpoint - continuing previous training")
         model = ClassificationGNN.load_from_checkpoint(args.checkpoint)
@@ -227,12 +174,11 @@ def train_test(args, trainer, Dataset):
         args.checkpoint = args.experiment_id + '\\best.ckpt'
     else:
         args.checkpoint = args.experiment_id + '/best.ckpt'
-
     test(args, Dataset)
 
 
 def test(args, Dataset):
-    """Test Only"""
+    # Test
     assert (
             args.checkpoint is not None
     ), "Expected the --checkpoint argument to be provided"
@@ -240,21 +186,16 @@ def test(args, Dataset):
     test_data = Dataset(args, root_dir=args.dataset_path, split="test")
     test_loader = test_data.get_dataloader(batch_size=args.batch_size, shuffle=False)
 
-    """Obtain node and edge feature dimensions"""
-    args.node_dim = test_data.node_dim()
     if args.UV_Net:
-        args.node_dim += 128
-    if args.single_node_prediction:
-        if args.node_dropping:
-            args.node_dim += 6
-        else:
-            args.node_dim += 8
-
+        args.node_dim = test_data.node_dim() + 128
+    else:
+        args.node_dim = test_data.node_dim()
     args.edge_dim = test_data.edge_dim()
 
     model = ClassificationGNN.load_from_checkpoint(args.checkpoint)
 
     """Obtaining Predictions"""
+
     predictions, ground_truths = [], []
 
     model.eval()
@@ -276,21 +217,15 @@ def test(args, Dataset):
         else:
             experiment_id = args.experiment_id.split('/')[-1]
 
-    # Save classification report + test set
+    # Save classification report
     print(classification_report(y_pred=predictions, y_true=ground_truths))
     if args.traintest == "train":
         if args.os == "Windows":
             with open(f"results\\classification_reports\\{experiment_id}.txt", 'w') as f:
                 f.write(str(classification_report(y_pred=predictions, y_true=ground_truths)))
-            with open(f"results\\checkpoints\\{experiment_id}\\test_set.txt", 'w') as f:
-                for assembly in args.test_set:
-                    f.write(f"{assembly}\n")
         else:
             with open(f"results/classification_reports/{experiment_id}.txt", 'w') as f:
                 f.write(str(classification_report(y_pred=predictions, y_true=ground_truths)))
-            with open(f"results/checkpoints/{experiment_id}/test_set.txt", 'w') as f:
-                for assembly in args.test_set:
-                    f.write(f"{assembly}\n")
     else:
         with open(f"test_classification_report.txt", 'w') as f:
             f.write(str(classification_report(y_pred=predictions, y_true=ground_truths)))
@@ -328,13 +263,32 @@ def test(args, Dataset):
     if args.traintest == "train":
         if args.os == "Windows":
             plt.savefig(fname=f'results\\confusion_matrices\\{experiment_id}.png', format='png')
-            plt.savefig(fname=f'results\\confusion_matrices\\{experiment_id}.pdf', format='pdf')
+
+            # Save train/val/test sets
+            with open(f"results\\checkpoints\\{experiment_id}\\train_set.txt", 'w') as f:
+                for assembly in args.train_set:
+                    f.write(f"{assembly}\n")
+            with open(f"results\\checkpoints\\{experiment_id}\\val_set.txt", 'w') as f:
+                for assembly in args.val_set:
+                    f.write(f"{assembly}\n")
+            with open(f"results\\checkpoints\\{experiment_id}\\test_set.txt", 'w') as f:
+                for assembly in args.test_set:
+                    f.write(f"{assembly}\n")
         else:
             plt.savefig(fname=f'results/confusion_matrices/{experiment_id}.png', format='png')
-            plt.savefig(fname=f'results/confusion_matrices/{experiment_id}.pdf', format='pdf')
+
+            # Save train/val/test sets
+            with open(f"results/checkpoints/{experiment_id}/train_set.txt", 'w') as f:
+                for assembly in args.train_set:
+                    f.write(f"{assembly}\n")
+            with open(f"results/checkpoints/{experiment_id}/val_set.txt", 'w') as f:
+                for assembly in args.val_set:
+                    f.write(f"{assembly}\n")
+            with open(f"results/checkpoints/{experiment_id}/test_set.txt", 'w') as f:
+                for assembly in args.test_set:
+                    f.write(f"{assembly}\n")
     else:
         plt.savefig(fname=f'test_confusion_matrix.png', format='png')
-        plt.savefig(fname=f'test_confusion_matrix.pdf', format='pdf')
 
     # Save organized results to CSV
     if args.traintest == "train":
@@ -344,42 +298,34 @@ def test(args, Dataset):
 
 if __name__ == "__main__":
     args = get_parser()
+    torch.cuda.empty_cache()
 
     """Setting Specific / Customized Arguments"""
     # Model settings
-    args.node_dropping = True  # dropping of "Metal_Ferrous_Steel (i.e., Default)" & "Paint" bodies
-    args.UV_Net = True  # joint training with UV-Net enabled
-    args.single_node_prediction = False  # batch-level randomization of mask for single node prediction task
-    args.fixed_split = True  # use pre-defined train_val and test splits (for comparison with baseline models)
+    args.node_dropping = True
+    args.UV_Net = True
 
     # Feature engineering settings
-    args.image_fingerprint = False  # 2D image fingerprint as generated using ResNet
-    args.MVCNN_embedding = True  # visual embeddings generated using MVCNN
+    args.image_fingerprint = False
+    args.MVCNN_embedding = True
+    args.ablation = ["body_name", "occ_name"]
 
-    # Ablations - features to remove from the node features
-    ablations = [
-        ["body_name", "occ_name"]
-    ]
+    # Random seed generation
+    if args.random_seed is None:
+        args.random_seed = random.randint(0, 99999999)
+        print(f"[Note] Generated new random seed = {args.random_seed}")
+    else:
+        print(f"[Note] Using existing random seed = {args.random_seed}")
 
-    for ablation in ablations:
-        args.ablation = ablation
+    """Begin The Experiment"""
+    if args.traintest == "train":
+        # Performing training of model, then automatically tests with best checkpoint
+        trainer, Dataset = initialization(args)
+        train_test(args, trainer, Dataset)
+    else:
+        # Performing testing of model, using existing checkpoint and random seed from experiment to be tested
+        random.seed(args.random_seed)
+        seed_everything(seed=args.random_seed, workers=True)
 
-        # Random seed generation
-        if args.random_seed is None:
-            args.random_seed = random.randint(0, 99999999)
-            print(f"[Note] Generated new random seed = {args.random_seed}")
-        else:
-            print(f"[Note] Using existing random seed = {args.random_seed}")
-
-        """Begin The Experiment"""
-        if args.traintest == "train":
-            # Performing training of model, then automatically tests with best checkpoint
-            trainer, Dataset = initialization(args)
-            train_test(args, trainer, Dataset)
-        else:
-            # Performing testing of model, using existing checkpoint and random seed from experiment to be tested
-            random.seed(args.random_seed)
-            seed_everything(seed=args.random_seed, workers=True)
-
-            Dataset = AssemblyGraphs
-            test(args, Dataset)
+        Dataset = AssemblyGraphs
+        test(args, Dataset)

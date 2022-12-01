@@ -3,11 +3,7 @@ import torchmetrics
 import torch
 from torch import nn
 import torch.nn.functional as F
-import numpy as np
-import random
-from sklearn.preprocessing import StandardScaler
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from datetime import datetime
 
 import utils.models.encoders as encoders
 
@@ -64,45 +60,6 @@ class _NonLinearClassifier(nn.Module):
         return x
 
 
-def concat_masked_material_features(args, batch, device, idx=None):
-    """
-        Create randomized masking and concatenation of material features - per batch
-    """
-    if args.node_dropping:
-        materials_feature = F.one_hot(batch["labels"], 6)  # one-hot material vector
-    else:
-        materials_feature = F.one_hot(batch["labels"], 8)  # one-hot material vector
-
-    # for each graph in batch.batch: concat one-hot mask to each batch.x, except for one random one
-    random_mask = []
-    for i in range(batch["assembly_graph"].num_graphs):
-        mask = np.ones(batch["assembly_graph"].ptr[i + 1] - batch["assembly_graph"].ptr[i])
-        # randomly choose node to mask (serve as prediction target) -> seed based on time
-        if idx:
-            mask[idx] = 0
-        else:
-            mask[random.Random(datetime.now()).randint(0, len(mask) - 1)] = 0
-        random_mask.extend(mask.tolist())
-
-    # set materials_feature to zeros if masked
-    materials_feature = materials_feature.cpu() * np.array(random_mask)[:, None]
-    # standardize the materials_feature
-    materials_feature = torch.from_numpy(StandardScaler().fit_transform(materials_feature))
-
-    batch["assembly_graph"].x = torch.cat((batch["assembly_graph"].x, materials_feature.to(device)),
-                                          dim=-1)  # add materials_feature to batch.x
-
-    return batch, random_mask
-
-
-def mask_filter(predictions, ground_truths, mask):
-    # only consider the target nodes (without ground truths material information in node features)
-    mask = np.array(mask)
-    predictions = predictions[mask == 0.0]
-    ground_truths = ground_truths[mask == 0]
-    return predictions, ground_truths
-
-
 ###############################################################################
 # Classification model - Assembly GNN
 ###############################################################################
@@ -156,15 +113,11 @@ class ClassificationGNN(pl.LightningModule):
         if self.args.UV_Net:
             batch = self.UV_embedding_insertion(batch)
 
-        if self.args.single_node_prediction:
-            batch, random_mask = concat_masked_material_features(self.args, batch, self.device)
-
         batched_assembly_graphs = batch["assembly_graph"].to(self.device)
         material_predictions = self.forward(batched_assembly_graphs)
 
-        if self.args.single_node_prediction:
-            material_predictions, labels = mask_filter(material_predictions, labels, random_mask)
-
+        # TODO: try out Focal Loss
+        # https://pytorch.org/vision/0.12/_modules/torchvision/ops/focal_loss.html
         loss = F.cross_entropy(material_predictions, labels, reduction="mean", weight=batch["weights"])
         self.log("train_loss", loss, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
         preds = F.softmax(material_predictions, dim=-1)
@@ -179,14 +132,8 @@ class ClassificationGNN(pl.LightningModule):
         if self.args.UV_Net:
             batch = self.UV_embedding_insertion(batch)
 
-        if self.args.single_node_prediction:
-            batch, random_mask = concat_masked_material_features(self.args, batch, self.device)
-
         batched_assembly_graphs = batch["assembly_graph"].to(self.device)
         material_predictions = self.forward(batched_assembly_graphs)
-
-        if self.args.single_node_prediction:
-            material_predictions, labels = mask_filter(material_predictions, labels, random_mask)
 
         loss = F.cross_entropy(material_predictions, labels, reduction="mean")
         self.log("val_loss", loss, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
@@ -196,19 +143,14 @@ class ClassificationGNN(pl.LightningModule):
         return loss
 
     def test_step(self, batch, batch_idx):
+
         labels = batch["labels"]
 
         if self.args.UV_Net:
             batch = self.UV_embedding_insertion(batch)
 
-        if self.args.single_node_prediction:
-            batch, random_mask = concat_masked_material_features(self.args, batch, self.device)
-
         batched_assembly_graphs = batch["assembly_graph"].to(self.device)
         material_predictions = self.forward(batched_assembly_graphs)
-
-        if self.args.single_node_prediction:
-            material_predictions, labels = mask_filter(material_predictions, labels, random_mask)
 
         loss = F.cross_entropy(material_predictions, labels, reduction="mean")
         self.log("test_loss", loss, on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
@@ -216,26 +158,6 @@ class ClassificationGNN(pl.LightningModule):
         self.log("test_acc", self.val_acc(preds, labels), on_step=False, on_epoch=True, sync_dist=True, prog_bar=True)
 
         preds = torch.argmax(preds, dim=-1)
-        return preds, labels
-
-    def inference_step(self, batch, idx):
-        labels = batch["labels"]
-
-        if self.args.UV_Net:
-            batch = self.UV_embedding_insertion(batch)
-
-        if self.args.single_node_prediction:
-            batch, random_mask = concat_masked_material_features(self.args, batch, self.device, idx)
-
-        batched_assembly_graphs = batch["assembly_graph"].to(self.device)
-        material_predictions = self.forward(batched_assembly_graphs)
-
-        if self.args.single_node_prediction:
-            material_predictions, labels = mask_filter(material_predictions, labels, random_mask)
-
-        preds = F.softmax(material_predictions, dim=-1)
-        preds = torch.argmax(preds, dim=-1)
-
         return preds, labels
 
     def UV_embedding_insertion(self, batch):
@@ -332,6 +254,9 @@ class UVNetClassifier(nn.Module):
         )
         # Map to logits
         out = self.clf(graph_emb)
+        # print(graph_emb)
+        # print(graph_emb.shape) # 64 x 128
+        # print(out.shape) # 64 x 8
 
         return out, graph_emb
 

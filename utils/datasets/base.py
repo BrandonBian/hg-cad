@@ -21,8 +21,9 @@ def filtering(batched_body_graphs):
         Providing mask and filtering for body_graphs (filter out those that are "NA")
 
         Return
-            [filtered_body_graphs]: A list of body graphs without the invalid elements ("NA")
-            [mask]: a boolen mask indicating the position of the valid elements
+            [filtered_body_graphs]
+            [filtered_labels]
+            [mask]
     """
 
     mask = [(element != "NA - bin file missing")
@@ -47,53 +48,47 @@ class BaseDatasetAssemblyGraphs(Dataset):
         else:
             return 8
 
-    def load_assemblies(self, file_paths, assemblies, vocab=None, inference=False):
+    def load_assemblies(self, file_paths, assemblies):
         """
             Input:
                 [file_paths] list of paths of assemblies to be loaded (e.g., train / val / test assemblies)
                 [assemblies] list of paths of ALL ASSEMBLIES loaded (i.e., train + val + test assemblies)
         """
+        assembly_graphs = []
+        dropped_cnt = 0
 
-        if inference:
-            pass
+        for file_path in assemblies:
+            if self.args.os == "Windows":
+                ag = AssemblyGraph(f"{file_path}\\assembly.json", self.args)
+            else:
+                ag = AssemblyGraph(f"{file_path}/assembly.json", self.args)
+            assembly_graph = ag.get_graph_networkx()
 
-        else:
-            assembly_graphs = []
+            """
+                Perform node-dropping of Default/Paint materials, if applicable
+                (This is SECOND time of node-dropping: for creation of vocab on entire dataset after dropping nodes)
+            """
+            if self.args.node_dropping:
+                remove_nodes = []
+                for node in assembly_graph.nodes(data=True):
+                    node_id = node[0]
+                    node_data = node[-1]
 
-            for file_path in tqdm(assemblies, desc="[Generating Vocab for one-hot encoding]"):
-                if self.args.os == "Windows":
-                    ag = AssemblyGraph(f"{file_path}\\assembly.json", self.args)
-                else:
-                    ag = AssemblyGraph(f"{file_path}/assembly.json", self.args)
-                assembly_graph = ag.get_graph_networkx()
+                    if node_data["material"] == "Paint" or \
+                            node_data["material"] == "Metal_Ferrous_Steel":
+                        remove_nodes.append(node_id)
 
-                """
-                    Perform node-dropping of Default/Paint materials, if applicable
-                    (This is SECOND time of node-dropping: for creation of vocab on entire dataset after dropping nodes)
-                """
-                if self.args.node_dropping:
-                    remove_nodes = []
-                    for node in assembly_graph.nodes(data=True):
-                        node_id = node[0]
-                        node_data = node[-1]
+                for node in remove_nodes:
+                    assembly_graph.remove_node(node)
 
-                        if node_data["material"] == "Paint" or \
-                                node_data["material"] == "Metal_Ferrous_Steel":
-                            remove_nodes.append(node_id)
+            assembly_graphs.append(assembly_graph)
 
-                    for node in remove_nodes:
-                        assembly_graph.remove_node(node)
-
-                assembly_graphs.append(assembly_graph)
-
-            # Get vocab on ENTIRE dataset, to ensure correct one-hot encoding
-            vocab, self.weights = get_vocab(assembly_graphs)
-            self.args.vocab = vocab
+        vocab, self.weights = get_vocab(
+            assembly_graphs)  # Get vocab on ENTIRE dataset, to ensure correct one-hot encoding
 
         """Load Assembly Graphs"""
-        dropped_cnt = 0
-        for assembly in tqdm(file_paths, desc="[Loading assembly graphs from JSONs]"):
-            assembly, body_graphs, materials, body_ids = self.load_one_graph(assembly, vocab)
+        for assembly in tqdm(file_paths):
+            assembly, body_graphs, materials = self.load_one_graph(assembly, vocab)
 
             # Check if all body graphs in this assembly are invalid - if so, discard this assembly
             all_body_graphs_invalid = True
@@ -104,8 +99,7 @@ class BaseDatasetAssemblyGraphs(Dataset):
                 dropped_cnt += 1
                 continue
 
-            self.data.append({"assembly_graph": assembly, "body_graphs": body_graphs, "labels": materials,
-                              "body_ids": body_ids})
+            self.data.append({"assembly_graph": assembly, "body_graphs": body_graphs, "labels": materials})
 
         """Obtain Some Statistics"""
 
@@ -122,14 +116,16 @@ class BaseDatasetAssemblyGraphs(Dataset):
         for label, freq in ground_truth_counter.most_common():
             ground_truth_dict[mapping[label]] = freq
 
-        print("[Stats] Ground truth distribution:", ground_truth_dict)
-        print("[Warning] Number of assemblies with no valid body graphs, thus dropped:", dropped_cnt)
+        print("Ground truth distribution:", ground_truth_dict)
+        print("Number of assemblies with no valid body graphs, thus dropped:", dropped_cnt)
 
     def load_one_graph(self, file_path, vocab):
         """
             Input:
                 [file_path]: a single path to a single assembly
                 [vocab]: the vocab dictionary generated from the entire dataset, for one-hot encoding features
+
+            Return:
         """
 
         if self.args.os == "Windows":
@@ -155,10 +151,9 @@ class BaseDatasetAssemblyGraphs(Dataset):
             for node in remove_nodes:
                 assembly_graph.remove_node(node)
 
-        assembly_graph, body_graphs, materials, body_ids = process_assembly_graph(assembly_graph, vocab, file_path,
-                                                                                  self.args)
+        assembly_graph, body_graphs, materials = process_assembly_graph(assembly_graph, vocab, file_path, self.args)
 
-        return assembly_graph, body_graphs, materials, body_ids
+        return assembly_graph, body_graphs, materials
 
     def __len__(self):
         return len(self.data)
@@ -176,16 +171,15 @@ class BaseDatasetAssemblyGraphs(Dataset):
             [sample["assembly_graph"] for sample in batch])
         batched_body_graphs = [body_graph for sample in batch for body_graph in sample["body_graphs"]]
         batched_labels = torch.tensor([label for sample in batch for label in sample["labels"]])
-        batched_body_ids = [body_id for sample in batch for body_id in sample["body_ids"]]
 
         # Creating batch for body_graphs, with masking of NA nodes
         batched_body_graphs, mask = filtering(batched_body_graphs)
         batched_body_graphs = dgl.batch(batched_body_graphs)
 
         return {"assembly_graph": batched_assembly_graph, "body_graphs": batched_body_graphs,
-                "labels": batched_labels, "mask": mask, "weights": self.weights, "body_ids": batched_body_ids}
+                "labels": batched_labels, "mask": mask, "weights": self.weights}
 
-    def get_dataloader(self, batch_size=128, shuffle=True, num_workers=0):
+    def get_dataloader(self, batch_size=128, shuffle=True, num_workers=6):
         """
             torch.utils.data.DataLoader -> can overload _collate(), but requires all tensors
             torch_geometric.loader.DataLoader -> can't overload _collate(), can add "kwargs", but wrong behavior for non-tensor
@@ -198,6 +192,81 @@ class BaseDatasetAssemblyGraphs(Dataset):
             collate_fn=self._collate,
             drop_last=True,
             num_workers=num_workers)
+
+
+class BaseDataset(Dataset):
+    @staticmethod
+    @abstractmethod
+    def num_classes():
+        pass
+
+    def load_graphs(self, file_paths, center_and_scale=True):
+        no_edge, too_many_nodes = 0, 0
+        self.data = []
+        for fn in tqdm(file_paths):
+            if not fn.exists():
+                continue
+            sample = self.load_one_graph(fn)
+            if sample is None:
+                continue
+            if sample["graph"].edata["x"].size(0) == 0:
+                # Catch the case of graphs with no edges
+                no_edge += 1
+                continue
+            if dgl.DGLGraph.number_of_nodes(sample["graph"]) > 150:
+                # Skip graphs that have too many nodes
+                too_many_nodes += 1
+                continue
+            self.data.append(sample)
+        if center_and_scale:
+            self.center_and_scale()
+        self.convert_to_float32()
+        print(f"Number of graphs skipped (no edge + too many nodes): {no_edge} + {too_many_nodes} / {len(file_paths)}")
+
+    def load_one_graph(self, file_path):
+        graph = load_graphs(str(file_path))[0][0]
+        sample = {"graph": graph, "filename": file_path.stem}
+        return sample
+
+    def center_and_scale(self):
+        for i in range(len(self.data)):
+            self.data[i]["graph"].ndata["x"], center, scale = util.center_and_scale_uvgrid(
+                self.data[i]["graph"].ndata["x"], return_center_scale=True
+            )
+            self.data[i]["graph"].edata["x"][..., :3] -= center
+            self.data[i]["graph"].edata["x"][..., :3] *= scale
+
+    def convert_to_float32(self):
+        for i in range(len(self.data)):
+            self.data[i]["graph"].ndata["x"] = self.data[i]["graph"].ndata["x"].type(FloatTensor)
+            self.data[i]["graph"].edata["x"] = self.data[i]["graph"].edata["x"].type(FloatTensor)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        sample = self.data[idx]
+        # if self.random_rotate:
+        #     rotation = util.get_random_rotation()
+        #     sample["graph"].ndata["x"] = util.rotate_uvgrid(sample["graph"].ndata["x"], rotation)
+        #     sample["graph"].edata["x"] = util.rotate_uvgrid(sample["graph"].edata["x"], rotation)
+        return sample
+
+    def _collate(self, batch):
+        batched_graph = dgl.batch([sample["graph"] for sample in batch])
+        batched_filenames = [sample["filename"] for sample in batch]
+        return {"graph": batched_graph, "filename": batched_filenames}
+
+    def get_dataloader(self, batch_size=128, shuffle=True, num_workers=6):
+        return DataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            collate_fn=self._collate,
+            num_workers=num_workers,  # Can be set to non-zero on Linux
+            drop_last=True
+        )
+
 
 class AssemblyGraph:
     """
@@ -235,7 +304,6 @@ class AssemblyGraph:
                 assembly_file = Path(assembly_data)
             else:
                 assembly_file = assembly_data
-            # print(assembly_file)
             assert assembly_file.exists()
             with open(assembly_file, "r", encoding="utf-8") as f:
                 self.assembly_data = json.load(f)

@@ -53,6 +53,7 @@ def get_parser():
     parser.add_argument("--MVCNN_embedding", type=bool, default=False)
     parser.add_argument("--random_seed", type=int)
     parser.add_argument("--os", type=str)
+    parser.add_argument("--fixed_split", type=bool, default=False)
 
     """Return Parser"""
     parser = Trainer.add_argparse_args(parser)
@@ -304,6 +305,7 @@ if __name__ == "__main__":
     # Model settings
     args.node_dropping = True
     args.UV_Net = True
+    args.fixed_split = True  # use pre-defined train_val and test splits (for comparison with baseline models)
 
     # Feature engineering settings
     args.image_fingerprint = False

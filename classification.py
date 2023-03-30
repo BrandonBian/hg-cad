@@ -40,7 +40,7 @@ def get_parser():
     parser.add_argument("--experiment_id", type=str)
     parser.add_argument("--node_dim", type=int)
     parser.add_argument("--edge_dim", type=int)
-    parser.add_argument('--gnn_type', type=str, default='sage', choices=['sage'])
+    parser.add_argument('--gnn_type', type=str, default='sage', choices=['sage', 'gat', 'gin'])
     parser.add_argument("--hid_dim", type=int, default=256)
     parser.add_argument("--num_layers", type=int, default=7)
     parser.add_argument("--train_set", type=list)

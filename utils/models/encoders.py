@@ -4,6 +4,8 @@ from torch_geometric.nn import MessagePassing
 import torch.nn.functional as F
 from dgl.nn.pytorch.conv import NNConv
 from dgl.nn.pytorch.glob import MaxPooling
+from torch_geometric.nn.inits import glorot
+from torch_geometric.utils import add_self_loops, softmax
 
 ###############################################################
 """UV-Net Encoders"""
@@ -401,6 +403,10 @@ class GraphNN(torch.nn.Module):
         for layer in range(self.num_layers):
             if self.network == 'sage':
                 self.layers.append(GraphSAGE(hid_dim))
+            elif self.network == 'gat':
+                self.layers.append(GAT(hid_dim))
+            elif self.network == 'gin':
+                self.layers.append(GIN(hid_dim))
             self.lin_layers.append(nn.Linear(hid_dim, hid_dim))
 
     def forward(self, x, edge_index, e, c):
@@ -442,3 +448,42 @@ class GraphSAGE(MessagePassing):
 
     def update(self, aggr_out):
         return F.normalize(aggr_out, p=2, dim=-1)
+
+
+class GAT(MessagePassing):
+    def __init__(self, emb_dim):
+        super(GAT, self).__init__()
+        self.att = nn.Parameter(torch.Tensor(1, 2 * emb_dim))
+        glorot(self.att)
+
+    def forward(self, x, edge_index, edge_attr):
+        edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
+        self_loop_attr = torch.zeros((x.size(0), edge_attr.size(1)), dtype=edge_attr.dtype).to(x.device)
+        edge_attr = torch.cat((edge_attr, self_loop_attr), dim=0)
+        return self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr)
+
+    def message(self, edge_index, x_i, x_j, edge_attr):
+        x_j = x_j + edge_attr
+        alpha = (torch.cat([x_i, x_j], dim=-1) * self.att).sum(dim=-1)
+        alpha = F.leaky_relu(alpha, 0.2)
+        alpha = softmax(alpha, edge_index[0])
+        return x_j * alpha.view(-1, 1)
+
+
+class GIN(MessagePassing):
+    def __init__(self, emb_dim):
+        super(GIN, self).__init__()
+        self.mlp = torch.nn.Sequential(
+            nn.Linear(emb_dim, 2 * emb_dim),
+            nn.BatchNorm1d(2 * emb_dim),
+            nn.ReLU(),
+            nn.Linear(2 * emb_dim, emb_dim))
+
+    def forward(self, x, edge_index, edge_attr):
+        return self.propagate(edge_index=edge_index, x=x, edge_attr=edge_attr)
+
+    def message(self, x_j, edge_attr):
+        return x_j + edge_attr
+
+    def update(self, aggr_out):
+        return self.mlp(aggr_out)

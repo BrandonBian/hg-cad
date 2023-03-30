@@ -2,8 +2,41 @@
 
 ### Section 1: Usage
 
-- **Setting up the environment**
-```
+- **Setting up the environment from scratch**
+  - Python == 3.8.5
+  - CUDA Toolkit ("nvcc --version") == 11.3
+  - PyTorch == 1.12.0
+
+```bash
+##################################
+# --- Ubuntu 20.04 LTS (X86) --- #
+##################################
+
+# Basics
+sudo apt-get update
+sudo apt-get upgrade -y
+sudo apt-get dist-upgrade -y
+sudo apt-get install build-essential
+
+# Install Anaconda for environment control
+wget https://repo.anaconda.com/archive/Anaconda3-2023.03-Linux-x86_64.sh
+bash Anaconda3-*.sh
+source ~/.bashrc
+
+# Create a conda environment
+conda create --name hgcad python=3.8.5
+conda activate hgcad
+
+# Install CUDA Toolkit (NVCC), version == 11.3
+wget https://developer.download.nvidia.com/compute/cuda/11.3.0/local_installers/cuda_11.3.0_465.19.01_linux.run
+sudo sh cuda_11.3.0_465.19.01_linux.run
+
+# Install PyTorch
+
+######################
+# --- Windows 10 --- #
+######################
+
 # Create conda environment "hg_cad" (Python==3.8.5, CUDA==11.3, PyTorch==1.12.0)
 conda env create -f environment.yml
 

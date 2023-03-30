@@ -47,17 +47,28 @@ conda activate hg_cad
 conda install pyg -c pyg
 ```
 
-- **Obtaining the data used in paper**: TODO
+- **Obtaining the data used in paper**:
+  - Make sure you have "gdown" installed (`conda install -c conda-forge gdown`)
+  - Unzip (`unzip <file>.zip`) and place inside a folder (e.g., `./dataset/`)
+  - **If "zipfile corrupt" error**: try `zip -FF Corrupted.zip --out New.zip` (PS: install zip with `sudo apt-get install zip`)
+```bash
+# Full dataset (on paper)
+gdown https://drive.google.com/uc?id=1f9jIgzSHRuT3jPMO17Vl0EYvq4v5kTue
 
+# Top 40% dataset (much smaller, suitable for sanity checks and test developments)
+gdown https://drive.google.com/uc?id=1h4iwI8tuOicZhjHGr60mgRu53kUDwEEM
+
+# Obtain the train and val spit - TODO
+```
 
 - **Training**: Training on train data, and automatically performs testing on test data when training is finished.
-```
+```bash
 # Additional tuning knobs included INSIDE python file -- see classification.py
 python classification.py train --dataset_path [path/to/dataset] --max_epoch 100 --batch_size 16 --gpus 1
 ```
 
 - **Testing**: Testing on test data based on checkpoint and random seed obtained from previously finished training.
-```
+```bash
 python classification.py test --dataset_path [path/to/dataset] --checkpoint [path/to/best.ckpt] --random_seed [seed integer]
 ```
 

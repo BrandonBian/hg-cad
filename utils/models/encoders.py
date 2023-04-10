@@ -400,13 +400,9 @@ class GraphNN(torch.nn.Module):
         self.layers = nn.ModuleList()
         self.lin_layers = nn.ModuleList()
 
+        # Use nn.Linear for all layers
         for layer in range(self.num_layers):
-            if self.network == 'sage':
-                self.layers.append(GraphSAGE(hid_dim))
-            elif self.network == 'gat':
-                self.layers.append(GAT(hid_dim))
-            elif self.network == 'gin':
-                self.layers.append(GIN(hid_dim))
+            self.layers.append(nn.Linear(hid_dim, hid_dim))
             self.lin_layers.append(nn.Linear(hid_dim, hid_dim))
 
     def forward(self, x, edge_index, e, c):
@@ -420,9 +416,19 @@ class GraphNN(torch.nn.Module):
             if self.network != 'gin':
                 h = self.lin_layers[layer](h_list[layer])
 
-            h = self.layers[layer](h_list[layer], edge_index, e)
+            h = self.layers[layer](h_list[layer])
             h = F.leaky_relu(h, negative_slope=0.2)
             h_list.append(h)
+
+        h_list = [h.unsqueeze(0) for h in h_list]
+        h = torch.sum(torch.cat(h_list), 0)
+
+        if self.hier_dim > 0:
+            h = self.output_layer(torch.cat((h, c), dim=-1))
+        else:
+            h = self.output_layer(h)
+
+        return h
 
         h_list = [h.unsqueeze_(0) for h in h_list]
         h = torch.sum(torch.cat(h_list), 0)

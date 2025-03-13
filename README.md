@@ -48,18 +48,10 @@ conda install pyg -c pyg
 ```
 
 - **Obtaining the data used in paper**:
-  - Make sure you have "gdown" installed (`conda install -c conda-forge gdown`)
+  - See [link](https://drive.google.com/file/d/10dHBssZEMqE7-Q-mbzDH-pQ2PYnvFuqX/view?usp=sharing)
+  - If you want to download from command line, try with "gdown" installed (`conda install -c conda-forge gdown`)
   - Unzip (`unzip <file>.zip`) and place inside a folder (e.g., `./dataset/`)
   - **If "zipfile corrupt" error**: try `zip -FF Corrupted.zip --out New.zip` (PS: install zip with `sudo apt-get install zip`)
-```bash
-# Full dataset (on paper)
-gdown https://drive.google.com/uc?id=1f9jIgzSHRuT3jPMO17Vl0EYvq4v5kTue
-
-# Top 40% dataset (much smaller, suitable for sanity checks and test developments)
-gdown https://drive.google.com/uc?id=1h4iwI8tuOicZhjHGr60mgRu53kUDwEEM
-
-# Obtain the train and val spit - TODO
-```
 
 - **Training**: Training on train data, and automatically performs testing on test data when training is finished.
 ```bash
@@ -85,15 +77,7 @@ python inference.py multiple_sample --inference_sample [path/to/inference/sample
 
 ---
 
-### Section 2: Data Processing Tools for HG-CAD
-
-| Tool | Description |
-| -- | -- |
-
-
----
-
-### Section 3: Baselines
+### Section 2: Baselines
 
 | Model | Data Format | Repository | Data Processing Tools | Results |
 | -- | -- | -- | -- | -- |
